@@ -7,7 +7,8 @@ from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from .models import Listing
 from .serializers import CustomListingSerializer
-
+from django.core.cache import cache
+from urllib.parse import urlencode
 # def index(request):
 #     listings = Listing.objects.order_by('-list_date').filter(is_published=True)
 #     paginator = Paginator(listings, 6)
@@ -40,38 +41,55 @@ def listing(request, listing_id):
 
 
 def search(request):
-    queryset_list = Listing.objects.order_by('-list_date')
-    #keywords
-    if 'keywords' in request.GET:
-        keywords = request.GET['keywords']
-        if keywords:
-            queryset_list = queryset_list.filter(description__icontains = keywords)
-    #city
-    if 'city' in request.GET:
-        city = request.GET['city']
-        if city:
-            queryset_list = queryset_list.filter(city__iexact = city)
-    #state
-    if 'state' in request.GET:
-        state = request.GET['state']
-        if state:
-            queryset_list = queryset_list.filter(state__iexact = state)
-    #bedrooms
-    if 'bedrooms' in request.GET:
-        bedrooms = request.GET['bedrooms']
-        if bedrooms:
-            queryset_list = queryset_list.filter(bedrooms__lte = bedrooms)
-    #price
-    if 'price' in request.GET:
-        price = request.GET['price']
-        if price:
-            queryset_list = queryset_list.filter(price__lte = price)
 
-    context = {
-        'state_choices' : state_choices,
-        'bedroom_choices' : bedroom_choices,
-        'price_choices' : price_choices,
-        'listings' : queryset_list,
-        'values' : request.GET
-    }
-    return render(request, 'listings/search.html', context)
+    query_params = request.GET.dict()
+    query_string = urlencode(query_params)
+    cache_key = f"search:{query_string}"
+
+    cached_response = cache.get(cache_key)
+    if cached_response:
+        print("🔁 Served from cache.")
+        return cached_response
+    else:
+        print("💾 Cache miss — querying the database.")
+        queryset_list = Listing.objects.order_by('-list_date')
+
+        # Filter by keywords
+        keywords = request.GET.get('keywords')
+        if keywords:
+            queryset_list = queryset_list.filter(description__icontains=keywords)
+
+        # Filter by city
+        city = request.GET.get('city')
+        if city:
+            queryset_list = queryset_list.filter(city__iexact=city)
+
+        # Filter by state
+        state = request.GET.get('state')
+        if state:
+            queryset_list = queryset_list.filter(state__iexact=state)
+
+        # Filter by bedrooms
+        bedrooms = request.GET.get('bedrooms')
+        if bedrooms:
+            queryset_list = queryset_list.filter(bedrooms__lte=bedrooms)
+
+        # Filter by price
+        price = request.GET.get('price')
+        if price:
+            queryset_list = queryset_list.filter(price__lte=price)
+
+        context = {
+            'state_choices': state_choices,
+            'bedroom_choices': bedroom_choices,
+            'price_choices': price_choices,
+            'listings': queryset_list,
+            'values': request.GET
+        }
+
+        response = render(request, 'listings/search.html', context)
+
+        # Store in cache for future use
+        cache.set(cache_key, response, timeout=600)
+
+        return response
